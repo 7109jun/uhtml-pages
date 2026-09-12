@@ -180,7 +180,7 @@ const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 const TOKENS = [
   "<html","</html>","<head","</head>","<body","</body>",
   "<div","</div>","<span","</span>","<p","</p>","<h1","</h1>","<h2","</h2>",
-  "<button","</button>","<a","</a>","<img","<script>","</script>","<style>","</style>",
+  "<button","</button>","<a","</a>","<img","<scr\x69pt>","</scr\x69pt>","<style>","</style>",
   "class","id","style","src","href","onclick","document","window","function",
   "addEventListener","getElementById","querySelector","querySelectorAll",
   "display","position","background","background-color","color","width","height",
@@ -353,11 +353,14 @@ function selectFile(name){
 }
 function renderAll(){renderFiles();renderTabs();loadEditor();$("status").textContent="UHTML-LZ · "+current}
 function addFile(type){
-  const ext=type==="html"?"html":type==="css"?"css":"js";
-  let name;
-  do{name=(type==="html"?"page":type==="css"?"style":"script")+nextId+(nextId===1?"":"")+"."+ext;nextId++}while(files.has(name));
-  files.set(name,{type,content:type==="html"?"<div></div>":type==="css":"body{}":"function main(){}"});
-  current=name;$("addModal").style.display="none";renderAll();$("editor").focus()
+  if(type!=="html" && type!=="css" && type!=="js") return;
+  const base=type==="html"?"page":type==="css"?"style":"script";
+  let name=base+"."+type, n=2;
+  while(files.has(name)) name=base+"-"+(n++)+"."+type;
+  const content=type==="html"?"<div></div>\n":type==="css"?"body {\n}\n":"function main() {\n}\n";
+  files.set(name,{type,content}); current=name;
+  $("addModal").style.display="none"; renderAll(); renderPreview();
+  setStatus("UHTML-LZ · "+name+" added"); $("editor").focus();
 }
 $("editor").addEventListener("input",()=>{saveEditor();renderPreview();$("status").textContent="UHTML-LZ · "+current+" · modified"})
 
@@ -373,9 +376,9 @@ function getBundle(){
 }
 function renderPreview(){
   const b=getBundle();
-  const srcdoc='<!doctype html><html><head><meta charset="utf-8"><style>'+b.css+
-    '</style></head><body>'+b.html+
-    '<script>try{'+b.js+'}catch(e){document.body.insertAdjacentHTML("beforeend","<pre>"+String(e).replace(/[<&>]/g,"")+"</pre>")}<\/script></body></html>";
+  const srcdoc="<!doctype html><html><head><meta charset=\"utf-8\"><style>"+b.css+
+    "</style></head><body>"+b.html+
+    "<scr"+"ipt>try{"+b.js+"}catch(e){document.body.insertAdjacentHTML(\"beforeend\",\"<pre>\"+String(e).replace(/[<&>]/g,\"\")+\"</pre>\")}<\/scr"+"ipt></body></html>";
   $("preview").srcdoc=srcdoc
 }
 function makeURL(){
@@ -472,7 +475,7 @@ $("editor").addEventListener("keydown",e=>{
 });
 
 function validFileName(name){
-  return /^[A-Za-z0-9._-]+\\.(html?|css|js)$/i.test(name) &&
+  return /^[A-Za-z0-9._-]+\.(html?|css|js)$/i.test(name) &&
          !/[\\\\/]/.test(name) && name.length<=80;
 }
 function fileTypeFromName(name){
@@ -498,21 +501,6 @@ function addNamedFile(name,type,content){
   renderAll();renderPreview();setStatus("UHTML-LZ · "+name+" added");
 }
 
-function promptAdd(){
-  const choice=prompt("파일 형식: html / css / js","html");
-  if(!choice)return;
-  const t=choice.toLowerCase();
-  if(!["html","css","js"].includes(t)){alert("html, css 또는 js만 지원합니다.");return}
-  const base=t==="html"?"page.html":t==="css"?"style.css":"script.js";
-  let name=base, n=1;
-  while(files.has(name)){
-    const p=base.lastIndexOf(".");
-    name=base.slice(0,p)+"-"+(++n)+base.slice(p);
-  }
-  try{addNamedFile(name,t)}catch(e){alert(e.message)}
-}
-
-$("addFileBtn").onclick=promptAdd;
 
 function renameFile(name){
   if(!files.has(name)||name==="index.html")return;
