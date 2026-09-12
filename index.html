@@ -544,15 +544,16 @@ function escapeScriptEnd(code){
 }
 
 function showPublicPage(bundle){
-  const page = '<!doctype html><html><head><meta charset="utf-8">' +
-    '<meta name="viewport" content="width=device-width,initial-scale=1">' +
-    '<style>' + bundle.css + '</style></head><body>' +
-    bundle.html +
-    '<script>' + escapeScriptEnd(bundle.js) + '<\/script>' +
-    '</body></html>';
-  document.open();
-  document.write(page);
-  document.close();
+  // wt=no is a real website view: remove the editor completely.
+  document.title = "UHTML Website";
+  document.documentElement.innerHTML = '<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style id="uhtml-public-style"></style></head><body><div id="uhtml-public-root"></div></body>';
+  const style=document.getElementById("uhtml-public-style");
+  style.textContent=bundle.css;
+  const root=document.getElementById("uhtml-public-root");
+  root.innerHTML=bundle.html;
+  const script=document.createElement("script");
+  script.textContent=bundle.js;
+  document.body.appendChild(script);
 }
 
 function loadFromHash(){
@@ -580,7 +581,8 @@ function loadFromHash(){
 let currentMode = "wa";
 
 function getMode(){
-  return new URLSearchParams(location.search).get("wt") === "no" ? "no" : "wa";
+  const params=new URLSearchParams(location.search);
+  return params.get("wt")==="no" ? "no" : "wa";
 }
 
 function applyMode(){
