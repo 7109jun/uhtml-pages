@@ -1,0 +1,643 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UHTML</title>
+<style>
+:root{
+  --bg:#f2f2f2;--panel:#fff;--line:#c8c8c8;--text:#181818;
+  --muted:#666;--hover:#e9e9e9;--active:#ddd;--accent:#1a1a1a;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{
+  font-family:Arial,"Noto Sans KR",sans-serif;
+  color:var(--text);background:var(--bg);overflow:hidden
+}
+button,input{font:inherit}
+.app{height:100vh;display:flex;flex-direction:column}
+.topbar{
+  height:48px;background:#fafafa;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;padding:0 10px;gap:7px
+}
+.title{font-size:16px;font-weight:700;margin-right:auto;padding-left:5px}
+.topbtn{
+  border:1px solid #aaa;background:#fff;padding:7px 13px;
+  border-radius:2px;cursor:pointer
+}
+.topbtn:hover{background:var(--hover)}
+.topbtn:active{background:var(--active)}
+.workspace{min-height:0;flex:1;display:flex}
+.sidebar{
+  width:230px;min-width:230px;background:#ededed;
+  border-right:1px solid var(--line);display:flex;flex-direction:column
+}
+.side-head{
+  height:39px;padding:11px 12px 8px;font-size:12px;
+  color:#555;border-bottom:1px solid var(--line);font-weight:700
+}
+.files{overflow:auto;padding:6px}
+.file{
+  display:flex;align-items:center;gap:8px;padding:8px 9px;
+  margin-bottom:2px;border-radius:2px;cursor:pointer;font:13px Consolas,monospace
+}
+.file:hover{background:#e3e3e3}
+.file.active{background:#d8d8d8}
+.file-icon{width:18px;text-align:center;font-family:Arial;font-size:11px}
+.file-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.editor-wrap{min-width:0;flex:1;display:flex;flex-direction:column;background:#fff}
+.tabs{
+  height:39px;background:#f5f5f5;border-bottom:1px solid var(--line);
+  display:flex;align-items:flex-end;overflow:auto
+}
+.tab{
+  height:38px;border-right:1px solid var(--line);padding:10px 14px;
+  min-width:100px;cursor:pointer;font:12px Consolas,monospace;
+  background:#ebebeb;position:relative
+}
+.tab.active{background:#fff}
+.tab .x{
+  margin-left:8px;color:#777;cursor:pointer
+}
+.editor{
+  min-height:0;flex:1;display:flex;background:#fff
+}
+textarea{
+  width:100%;height:100%;border:0;outline:0;resize:none;
+  padding:16px 18px;font:14px/1.55 Consolas,"Liberation Mono",monospace;
+  color:#111;background:#fff;tab-size:2
+}
+.statusbar{
+  height:27px;border-top:1px solid var(--line);background:#f4f4f4;
+  display:flex;align-items:center;padding:0 10px;color:#555;
+  font:11px Consolas,monospace
+}
+.preview{
+  width:42%;min-width:330px;border-left:1px solid var(--line);
+  display:flex;flex-direction:column;background:#f5f5f5
+}
+.preview-head{
+  height:39px;padding:11px 12px;border-bottom:1px solid var(--line);
+  font-size:12px;font-weight:700
+}
+iframe{border:0;flex:1;background:#fff}
+.modal-backdrop{
+  position:fixed;inset:0;background:rgba(0,0,0,.25);
+  display:none;align-items:center;justify-content:center
+}
+.modal{
+  width:360px;background:#fff;border:1px solid #999;box-shadow:0 5px 25px rgba(0,0,0,.2)
+}
+.modal-head{padding:12px;border-bottom:1px solid var(--line);font-weight:700}
+.modal-body{padding:13px}
+.modal-body button{
+  display:block;width:100%;margin:7px 0;text-align:left;padding:10px 12px;
+  border:1px solid #aaa;background:#fafafa;cursor:pointer
+}
+.modal-body button:hover{background:#eee}
+.modal-foot{padding:10px 13px;border-top:1px solid var(--line);text-align:right}
+input.shareurl{
+  width:100%;padding:9px;border:1px solid #aaa;font:12px Consolas,monospace
+}
+.hidden{display:none!important}
+@media(max-width:850px){
+  .sidebar{width:190px;min-width:190px}
+  .preview{display:none}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <div class="title">UHTML</div>
+    <button class="topbtn" id="shareBtn">Share</button>
+    <button class="topbtn" id="addFileBtn">파일 추가</button>
+  </div>
+
+  <div class="workspace">
+    <aside class="sidebar">
+      <div class="side-head">FILES</div>
+      <div id="files" class="files"></div>
+      <div style="padding:8px;border-top:1px solid var(--line);font-size:11px;color:#666">
+        <div>Double-click a file to rename</div>
+        <div>Right-click a file to remove</div>
+      </div>
+    </aside>
+
+    <section class="editor-wrap">
+      <div id="tabs" class="tabs"></div>
+      <div class="editor">
+        <textarea id="editor" spellcheck="false"></textarea>
+      </div>
+      <div class="statusbar">
+        <span id="status">UHTML-LZ · Ready</span>
+        <span id="stats" style="margin-left:auto"></span>
+      </div>
+    </section>
+
+    <section class="preview">
+      <div class="preview-head">PREVIEW</div>
+      <iframe id="preview" sandbox="allow-scripts"></iframe>
+    </section>
+  </div>
+</div>
+
+<div id="addModal" class="modal-backdrop">
+  <div class="modal">
+    <div class="modal-head">파일 추가</div>
+    <div class="modal-body">
+      <button data-type="html">HTML 파일</button>
+      <button data-type="css">CSS 파일</button>
+      <button data-type="js">JavaScript 파일</button>
+    </div>
+    <div class="modal-foot"><button class="topbtn" id="closeAdd">취소</button></div>
+  </div>
+</div>
+
+<div id="shareModal" class="modal-backdrop">
+  <div class="modal">
+    <div class="modal-head">UHTML Share</div>
+    <div class="modal-body">
+      <input id="shareUrl" class="shareurl" readonly>
+      <div style="margin-top:9px;color:#666;font-size:12px">이 URL 하나에 UHTML 데이터가 들어 있습니다.</div>
+    </div>
+    <div class="modal-foot">
+      <button class="topbtn" id="copyShare">복사</button>
+      <button class="topbtn" id="closeShare">닫기</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ---------------- UHTML-LZ ---------------- */
+
+const MAGIC = [0x55,0x48,0x54,0x4d,0x4c,0x01];
+const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+const TOKENS = [
+  "<html","</html>","<head","</head>","<body","</body>",
+  "<div","</div>","<span","</span>","<p","</p>","<h1","</h1>","<h2","</h2>",
+  "<button","</button>","<a","</a>","<img","<script>","</script>","<style>","</style>",
+  "class","id","style","src","href","onclick","document","window","function",
+  "addEventListener","getElementById","querySelector","querySelectorAll",
+  "display","position","background","background-color","color","width","height",
+  "margin","padding","font","font-size","border","border-radius","flex","grid",
+  "const","let","var","return","true","false"
+];
+const tokenMap=new Map(TOKENS.map((s,i)=>[s,i]));
+
+function u8(s){return new TextEncoder().encode(s)}
+function text(b){return new TextDecoder().decode(b)}
+function varint(n){
+  const a=[];while(n>=128){a.push((n&127)|128);n=Math.floor(n/128)}a.push(n);return a
+}
+function readVar(a,p){
+  let n=0,sh=0;
+  while(p.i<a.length){const x=a[p.i++];n+=(x&127)*2**sh;if(!(x&128))return n;sh+=7}
+  throw Error("bad varint")
+}
+function tokenEncode(bytes){
+  const s=text(bytes),out=[];let i=0,lit=[];
+  const flush=()=>{if(lit.length){out.push(0,...varint(lit.length),...lit);lit=[]}};
+  while(i<s.length){
+    let best=-1,len=0;
+    for(let t=0;t<TOKENS.length;t++){const z=TOKENS[t];if(s.startsWith(z,i)&&z.length>len){best=t;len=z.length}}
+    if(best>=0){flush();out.push(1,...varint(best));i+=len}
+    else{const cp=s.codePointAt(i),ch=String.fromCodePoint(cp);lit.push(...u8(ch));i+=ch.length}
+  }
+  flush();return Uint8Array.from(out)
+}
+function tokenDecode(a){
+  const out=[];let p={i:0};
+  while(p.i<a.length){
+    const type=a[p.i++];
+    if(type===0){const n=readVar(a,p);for(let i=0;i<n;i++)out.push(a[p.i++])}
+    else if(type===1){const id=readVar(a,p);if(id>=TOKENS.length)throw Error("bad token");out.push(...u8(TOKENS[id]))}
+    else throw Error("bad token stream")
+  }
+  return Uint8Array.from(out)
+}
+function lzCompress(a){
+  const n=a.length,out=[],W=4096,MIN=3;let i=0,litStart=0;
+  const flushLit=end=>{for(let k=litStart;k<end;k++)out.push(0,a[k])};
+  while(i<n){
+    let bestLen=0,bestDist=0;
+    const start=Math.max(0,i-W);
+    for(let j=i-1;j>=start;j--){
+      let k=0;
+      while(i+k<n&&a[j+k]===a[i+k]&&k<255&&j+k<i)k++;
+      if(k>=MIN&&k>bestLen){bestLen=k;bestDist=i-j;if(k>=64)break}
+    }
+    let seqLen=0,reps=0;
+    const maxPat=Math.min(64,Math.floor((n-i)/2));
+    for(let L=1;L<=maxPat;L++){
+      let r=1;
+      while(i+r*L+L<=n){
+        let ok=true;for(let k=0;k<L;k++)if(a[i+k]!==a[i+r*L+k]){ok=false;break}
+        if(!ok)break;r++
+      }
+      if(r>=2&&L*r>seqLen*reps){seqLen=L;reps=r}
+    }
+    if(seqLen>=1&&reps>=2&&seqLen*reps>=MIN&&seqLen*reps>bestLen){
+      if(litStart<i)flushLit(i);
+      out.push(1,seqLen,reps,...a.slice(i,i+seqLen));
+      i+=seqLen*reps;litStart=i;continue
+    }
+    if(bestLen>=MIN){
+      if(litStart<i)flushLit(i);
+      out.push(2,...varint(bestDist),bestLen);i+=bestLen;litStart=i
+    }else i++
+  }
+  if(litStart<n)flushLit(n);return Uint8Array.from(out)
+}
+function lzDecompress(a){
+  const out=[];let p=0;
+  while(p<a.length){
+    const op=a[p++];
+    if(op===0)out.push(a[p++]);
+    else if(op===1){
+      const len=a[p++],reps=a[p++],pat=a.slice(p,p+len);p+=len;
+      for(let r=0;r<reps;r++)out.push(...pat)
+    }else if(op===2){
+      let q={i:p};const dist=readVar(a,q);p=q.i;const len=a[p++];
+      if(dist<=0||dist>out.length)throw Error("bad distance");
+      for(let k=0;k<len;k++)out.push(out[out.length-dist])
+    }else throw Error("bad LZ opcode")
+  }
+  return Uint8Array.from(out)
+}
+function encodeSection(src){
+  const original=u8(src),tok=tokenEncode(original),lz=lzCompress(tok);
+  let best=original,mode=0;
+  if(tok.length<best.length){best=tok;mode=1}
+  if(lz.length<best.length){best=lz;mode=2}
+  return{mode,originalSize:original.length,data:best}
+}
+function decodeSection(mode,data,originalSize){
+  let a=mode===0?data:mode===1?tokenDecode(data):mode===2?tokenDecode(lzDecompress(data)):null;
+  if(!a||a.length!==originalSize)throw Error("section decode failed");
+  return text(a)
+}
+function makeBinary(html,css,js){
+  const secs=[encodeSection(html),encodeSection(css),encodeSection(js)];
+  const a=[...MAGIC,3];
+  for(const s of secs)a.push(s.mode,...varint(s.originalSize),...varint(s.data.length),...s.data);
+  return Uint8Array.from(a)
+}
+function parseBinary(a){
+  for(let i=0;i<MAGIC.length;i++)if(a[i]!==MAGIC[i])throw Error("not UHTML");
+  let p={i:MAGIC.length};if(a[p.i++]!==3)throw Error("unsupported section count");
+  const vals=[];
+  for(let n=0;n<3;n++){
+    const mode=a[p.i++],os=readVar(a,p),cs=readVar(a,p),d=a.slice(p.i,p.i+cs);p.i+=cs;
+    vals.push(decodeSection(mode,d,os))
+  }
+  return{html:vals[0],css:vals[1],js:vals[2]}
+}
+function b64enc(a){
+  let s="",i=0;
+  for(;i+2<a.length;i+=3){const n=(a[i]<<16)|(a[i+1]<<8)|a[i+2];s+=B64[n>>18&63]+B64[n>>12&63]+B64[n>>6&63]+B64[n&63]}
+  if(i<a.length){let n=a[i]<<16;if(i+1<a.length)n|=a[i+1]<<8;s+=B64[n>>18&63]+B64[n>>12&63];if(i+1<a.length)s+=B64[n>>6&63]}
+  return s
+}
+function b64dec(s){
+  const map=new Map([...B64].map((c,i)=>[c,i]));let acc=0,bits=0,out=[];
+  for(const c of s){const v=map.get(c);if(v===undefined)throw Error("bad base64url");acc=(acc<<6)|v;bits+=6;if(bits>=8){bits-=8;out.push(acc>>bits&255)}}
+  return Uint8Array.from(out)
+}
+
+/* ---------------- Multi-file editor ---------------- */
+
+const files = new Map([
+  ["index.html",{type:"html",content:"<div class=\"box\"><h1>Hello UHTML</h1><p id=\"msg\">Edit me.</p><button onclick=\"hello()\">Click</button></div>"}],
+  ["style.css",{type:"css",content:"body{font-family:Arial;background:#eef}.box{max-width:520px;margin:80px auto;padding:30px;background:white;border:1px solid #bbb;text-align:center}button{padding:8px 16px}"}],
+  ["app.js",{type:"js",content:"function hello(){document.getElementById('msg').textContent='UHTML works!';}"}]
+]);
+let current="index.html";
+let nextId=1;
+
+const $=id=>document.getElementById(id);
+
+function icon(type){return type==="html"?"H":type==="css"?"C":"J"}
+
+function renderFiles(){
+  const el=$("files");el.innerHTML="";
+  [...files.entries()].forEach(([name,f])=>{
+    const row=document.createElement("div");row.className="file"+(name===current?" active":"");
+    row.innerHTML='<span class="file-icon">'+icon(f.type)+'</span><span class="file-name"></span>';
+    row.querySelector(".file-name").textContent=name;
+    row.onclick=()=>selectFile(name);
+    el.appendChild(row)
+  })
+}
+function renderTabs(){
+  const el=$("tabs");el.innerHTML="";
+  [...files.entries()].forEach(([name,f])=>{
+    const tab=document.createElement("div");tab.className="tab"+(name===current?" active":"");
+    tab.textContent=name;
+    if(name!=="index.html"){
+      const x=document.createElement("span");x.className="x";x.textContent="×";
+      x.onclick=e=>{e.stopPropagation();files.delete(name);if(current===name)current="index.html";saveEditor();renderAll()}
+      tab.appendChild(x)
+    }
+    tab.onclick=()=>selectFile(name);el.appendChild(tab)
+  })
+}
+function loadEditor(){ $("editor").value=files.get(current).content }
+function saveEditor(){if(files.has(current))files.get(current).content=$("editor").value}
+function selectFile(name){
+  saveEditor();current=name;renderAll();renderPreview()
+}
+function renderAll(){renderFiles();renderTabs();loadEditor();$("status").textContent="UHTML-LZ · "+current}
+function addFile(type){
+  const ext=type==="html"?"html":type==="css"?"css":"js";
+  let name;
+  do{name=(type==="html"?"page":type==="css"?"style":"script")+nextId+(nextId===1?"":"")+"."+ext;nextId++}while(files.has(name));
+  files.set(name,{type,content:type==="html"?"<div></div>":type==="css":"body{}":"function main(){}"});
+  current=name;$("addModal").style.display="none";renderAll();$("editor").focus()
+}
+$("editor").addEventListener("input",()=>{saveEditor();renderPreview();$("status").textContent="UHTML-LZ · "+current+" · modified"})
+
+function getBundle(){
+  saveEditor();
+  let html="",css="",js="";
+  for(const [name,f] of files){
+    if(f.type==="html")html+=f.content+"\n";
+    else if(f.type==="css")css+=f.content+"\n";
+    else if(f.type==="js")js+=f.content+"\n";
+  }
+  return{html,css,js}
+}
+function renderPreview(){
+  const b=getBundle();
+  const srcdoc='<!doctype html><html><head><meta charset="utf-8"><style>'+b.css+
+    '</style></head><body>'+b.html+
+    '<script>try{'+b.js+'}catch(e){document.body.insertAdjacentHTML("beforeend","<pre>"+String(e).replace(/[<&>]/g,"")+"</pre>")}<\/script></body></html>";
+  $("preview").srcdoc=srcdoc
+}
+function makeURL(){
+  const b=getBundle(),bin=makeBinary(b.html,b.css,b.js);
+  return location.href.split("#")[0].split("?")[0]+"#/u/"+b64enc(bin)
+}
+function openPayload(payload){
+  const b=parseBinary(b64dec(payload));
+  files.clear();
+  files.set("index.html",{type:"html",content:b.html});
+  files.set("style.css",{type:"css",content:b.css});
+  files.set("app.js",{type:"js",content:b.js});
+  current="index.html";renderAll();renderPreview();
+}
+function loadFromHash(){
+  if(!location.hash.startsWith("#/u/")){renderAll();renderPreview();return}
+  try{
+    openPayload(location.hash.slice(4));
+    $("status").textContent="UHTML-LZ · decoded from URL"
+  }catch(e){$("status").textContent="UHTML error: "+e.message}
+}
+
+/* ---------------- UI ---------------- */
+
+$("addFileBtn").onclick=()=>$("addModal").style.display="flex";
+$("closeAdd").onclick=()=>$("addModal").style.display="none";
+document.querySelectorAll("[data-type]").forEach(b=>b.onclick=()=>addFile(b.dataset.type));
+
+$("shareBtn").onclick=()=>{
+  try{
+    const url=makeURL();
+    $("shareUrl").value=url;
+    $("shareModal").style.display="flex";
+    history.replaceState(null,"",url);
+  }catch(e){$("status").textContent="Share error: "+e.message}
+};
+$("closeShare").onclick=()=>$("shareModal").style.display="none";
+$("copyShare").onclick=async()=>{
+  try{
+    await navigator.clipboard.writeText($("shareUrl").value);
+    $("status").textContent="UHTML-LZ · URL copied"
+  }catch(e){$("status").textContent="Copy failed"}
+};
+
+/* ---------------- Upgrade layer ---------------- */
+
+let dirty = false;
+const fileContext = document.createElement("div");
+fileContext.style.cssText = "position:fixed;display:none;background:#fff;border:1px solid #999;box-shadow:0 4px 16px rgba(0,0,0,.18);z-index:20;padding:4px;min-width:150px";
+fileContext.innerHTML = `
+  <button data-act="rename" style="display:block;width:100%;border:0;background:#fff;text-align:left;padding:8px;cursor:pointer">이름 변경</button>
+  <button data-act="delete" style="display:block;width:100%;border:0;background:#fff;text-align:left;padding:8px;cursor:pointer">삭제</button>
+`;
+document.body.appendChild(fileContext);
+
+function setStatus(s){
+  $("status").textContent=s;
+  updateStats();
+}
+function updateStats(){
+  try{
+    const b=getBundle();
+    const raw=new TextEncoder().encode(b.html).length+
+             new TextEncoder().encode(b.css).length+
+             new TextEncoder().encode(b.js).length;
+    const u=makeBinary(b.html,b.css,b.js).length;
+    const ratio=raw?((1-u/raw)*100):0;
+    $("stats").textContent=`raw ${raw} B · UHTML ${u} B · ${ratio>=0?ratio.toFixed(1)+"% smaller":Math.abs(ratio).toFixed(1)+"% larger"}`;
+  }catch(_){}
+}
+function markDirty(){
+  dirty=true;
+  const f=files.get(current);
+  if(f) f.content=$("editor").value;
+  updateStats();
+}
+
+$("editor").addEventListener("input",()=>{
+  markDirty();
+  renderPreview();
+  setStatus("UHTML-LZ · "+current+" · modified");
+});
+$("editor").addEventListener("keydown",e=>{
+  if(e.key==="Tab"){
+    e.preventDefault();
+    const a=e.target,b=a.selectionStart;
+    a.value=a.value.slice(0,b)+"  "+a.value.slice(a.selectionEnd);
+    a.selectionStart=a.selectionEnd=b+2;
+    markDirty();renderPreview();
+  }
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="s"){
+    e.preventDefault();saveEditor();dirty=false;setStatus("UHTML-LZ · saved");
+  }
+});
+
+function validFileName(name){
+  return /^[A-Za-z0-9._-]+\\.(html?|css|js)$/i.test(name) &&
+         !/[\\\\/]/.test(name) && name.length<=80;
+}
+function fileTypeFromName(name){
+  const ext=name.toLowerCase().split(".").pop();
+  if(ext==="html"||ext==="htm")return"html";
+  if(ext==="css")return"css";
+  if(ext==="js")return"js";
+  return null;
+}
+function defaultContent(type){
+  if(type==="html")return "<div></div>\n";
+  if(type==="css")return "body {\n}\n";
+  return "function main() {\n}\n";
+}
+
+function addNamedFile(name,type,content){
+  if(!validFileName(name)) throw Error("지원하지 않는 파일 이름입니다.");
+  if(files.has(name)) throw Error("같은 이름의 파일이 이미 있습니다.");
+  if(!type) type=fileTypeFromName(name);
+  files.set(name,{type,content:content??defaultContent(type)});
+  current=name;
+  dirty=true;
+  renderAll();renderPreview();setStatus("UHTML-LZ · "+name+" added");
+}
+
+function promptAdd(){
+  const choice=prompt("파일 형식: html / css / js","html");
+  if(!choice)return;
+  const t=choice.toLowerCase();
+  if(!["html","css","js"].includes(t)){alert("html, css 또는 js만 지원합니다.");return}
+  const base=t==="html"?"page.html":t==="css"?"style.css":"script.js";
+  let name=base, n=1;
+  while(files.has(name)){
+    const p=base.lastIndexOf(".");
+    name=base.slice(0,p)+"-"+(++n)+base.slice(p);
+  }
+  try{addNamedFile(name,t)}catch(e){alert(e.message)}
+}
+
+$("addFileBtn").onclick=promptAdd;
+
+function renameFile(name){
+  if(!files.has(name)||name==="index.html")return;
+  const f=files.get(name);
+  const nn=prompt("새 파일 이름",name);
+  if(!nn||nn===name)return;
+  if(!validFileName(nn)||files.has(nn)){alert("파일 이름이 올바르지 않거나 이미 존재합니다.");return}
+  const nt=fileTypeFromName(nn);
+  // Prevent accidentally changing the file language by rename.
+  if(nt!==f.type){alert("파일 확장자를 같은 종류로 유지하세요.");return}
+  files.delete(name);files.set(nn,{...f});if(current===name)current=nn;
+  dirty=true;renderAll();renderPreview();setStatus("UHTML-LZ · renamed")
+}
+
+function removeFile(name){
+  if(name==="index.html"){alert("index.html은 삭제할 수 없습니다.");return}
+  if(!confirm(`"${name}"을 삭제할까요?`))return;
+  files.delete(name);
+  if(current===name)current=[...files.keys()][0]||"index.html";
+  dirty=true;renderAll();renderPreview();setStatus("UHTML-LZ · deleted")
+}
+
+function showContext(e,name){
+  e.preventDefault();
+  fileContext.style.left=Math.min(e.clientX,innerWidth-170)+"px";
+  fileContext.style.top=Math.min(e.clientY,innerHeight-100)+"px";
+  fileContext.style.display="block";
+  fileContext.dataset.name=name;
+}
+document.addEventListener("click",e=>{
+  if(!fileContext.contains(e.target))fileContext.style.display="none";
+});
+fileContext.querySelector('[data-act="rename"]').onclick=()=>{
+  renameFile(fileContext.dataset.name);fileContext.style.display="none"
+};
+fileContext.querySelector('[data-act="delete"]').onclick=()=>{
+  removeFile(fileContext.dataset.name);fileContext.style.display="none"
+};
+
+function enhanceFileRows(){
+  document.querySelectorAll(".file").forEach(row=>{
+    const name=row.querySelector(".file-name").textContent;
+    row.ondblclick=e=>{e.stopPropagation();renameFile(name)};
+    row.oncontextmenu=e=>showContext(e,name);
+    row.draggable=true;
+    row.ondragstart=e=>e.dataTransfer.setData("text/uhtml-file",name);
+    row.ondragover=e=>e.preventDefault();
+    row.ondrop=e=>{
+      e.preventDefault();
+      const from=e.dataTransfer.getData("text/uhtml-file");
+      if(!from||from===name)return;
+      const keys=[...files.keys()], a=keys.indexOf(from), b=keys.indexOf(name);
+      if(a<0||b<0)return;
+      keys.splice(a,1);keys.splice(b,0,from);
+      const old=new Map(files);
+      files.clear();keys.forEach(k=>files.set(k,old.get(k)));
+      renderAll();setStatus("UHTML-LZ · file order changed");
+    };
+  });
+}
+const oldRenderAll=renderAll;
+renderAll=function(){
+  oldRenderAll();
+  enhanceFileRows();
+  updateStats();
+};
+
+function generateShareURL(){
+  saveEditor();
+  const u=makeURL();
+  history.replaceState(null,"",u);
+  return u;
+}
+$("shareBtn").onclick=()=>{
+  try{
+    const url=generateShareURL();
+    $("shareUrl").value=url;
+    $("shareModal").style.display="flex";
+    setStatus("UHTML-LZ · share URL generated");
+    dirty=false;
+  }catch(e){setStatus("Share error: "+e.message)}
+};
+
+function importTextFiles(fileList){
+  const arr=[...fileList];
+  if(!arr.length)return;
+  let added=0, skipped=0;
+  for(const file of arr){
+    const type=fileTypeFromName(file.name);
+    if(!type){skipped++;continue}
+    const reader=new FileReader();
+    reader.onload=()=>{
+      try{
+        let name=file.name;
+        if(files.has(name)){
+          const p=name.lastIndexOf("."),base=name.slice(0,p),ext=name.slice(p);
+          let n=2;while(files.has(`${base}-${n}${ext}`))n++;
+          name=`${base}-${n}${ext}`;
+        }
+        files.set(name,{type,content:String(reader.result||"")});
+        current=name;added++;dirty=true;renderAll();renderPreview();
+        setStatus(`UHTML-LZ · imported ${added}${skipped?` · skipped ${skipped}`:""}`);
+      }catch(e){setStatus("Import error: "+e.message)}
+    };
+    reader.readAsText(file);
+  }
+}
+
+const dropZone=document.body;
+dropZone.addEventListener("dragover",e=>{
+  if(e.dataTransfer?.files?.length)e.preventDefault();
+});
+dropZone.addEventListener("drop",e=>{
+  if(!e.dataTransfer?.files?.length)return;
+  e.preventDefault();importTextFiles(e.dataTransfer.files);
+});
+
+$("addFileBtn").title="새 HTML/CSS/JS 파일 추가";
+$("shareBtn").title="현재 프로젝트를 하나의 UHTML URL로 공유";
+
+window.addEventListener("hashchange",loadFromHash);
+
+renderAll();
+renderPreview();
+updateStats();
+</script>
+</body>
+</html>
