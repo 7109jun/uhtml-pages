@@ -68,20 +68,12 @@ textarea{
   padding:16px 18px;font:14px/1.55 Consolas,"Liberation Mono",monospace;
   color:#111;background:#fff;tab-size:2
 }
+textarea.readonly{background:#f5f5f5;color:#666}
 .statusbar{
   height:27px;border-top:1px solid var(--line);background:#f4f4f4;
   display:flex;align-items:center;padding:0 10px;color:#555;
   font:11px Consolas,monospace
 }
-.preview{
-  width:42%;min-width:330px;border-left:1px solid var(--line);
-  display:flex;flex-direction:column;background:#f5f5f5
-}
-.preview-head{
-  height:39px;padding:11px 12px;border-bottom:1px solid var(--line);
-  font-size:12px;font-weight:700
-}
-iframe{border:0;flex:1;background:#fff}
 .modal-backdrop{
   position:fixed;inset:0;background:rgba(0,0,0,.25);
   display:none;align-items:center;justify-content:center
@@ -103,7 +95,6 @@ input.shareurl{
 .hidden{display:none!important}
 @media(max-width:850px){
   .sidebar{width:190px;min-width:190px}
-  .preview{display:none}
 }
 </style>
 </head>
@@ -135,11 +126,6 @@ input.shareurl{
         <span id="stats" style="margin-left:auto"></span>
       </div>
     </section>
-
-    <section class="preview">
-      <div class="preview-head">PREVIEW</div>
-      <iframe id="preview" sandbox="allow-scripts"></iframe>
-    </section>
   </div>
 </div>
 
@@ -160,7 +146,7 @@ input.shareurl{
     <div class="modal-head">UHTML Share</div>
     <div class="modal-body">
       <input id="shareUrl" class="shareurl" readonly>
-      <div style="margin-top:9px;color:#666;font-size:12px">이 URL 하나에 UHTML 데이터가 들어 있습니다.</div>
+      <div style="margin-top:9px;color:#666;font-size:12px">wt=wa는 수정 가능, wt=no는 읽기 전용입니다.</div>
     </div>
     <div class="modal-foot">
       <button class="topbtn" id="copyShare">복사</button>
@@ -172,142 +158,294 @@ input.shareurl{
 <script>
 "use strict";
 
-/* ---------------- UHTML-LZ ---------------- */
+/* ---------------- UHTML-LZ v2 ---------------- */
 
-const MAGIC = [0x55,0x48,0x54,0x4d,0x4c,0x01];
+const MAGIC = [0x55,0x48,0x54,0x4d,0x4c,0x02]; // UHTML-LZ v2
+const OLD_MAGIC = [0x55,0x48,0x54,0x4d,0x4c,0x01];
 const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
+// Static web dictionary. IDs are compact and are encoded before LZ.
 const TOKENS = [
-  "<html","</html>","<head","</head>","<body","</body>",
-  "<div","</div>","<span","</span>","<p","</p>","<h1","</h1>","<h2","</h2>",
-  "<button","</button>","<a","</a>","<img","<scr\x69pt>","</scr\x69pt>","<style>","</style>",
-  "class","id","style","src","href","onclick","document","window","function",
-  "addEventListener","getElementById","querySelector","querySelectorAll",
-  "display","position","background","background-color","color","width","height",
-  "margin","padding","font","font-size","border","border-radius","flex","grid",
-  "const","let","var","return","true","false"
+  "<html","</html>","<head","</head>","<body","</body>","<title","</title>",
+  "<meta","<link","<style>","</style>","<scr"+"ipt>","</scr"+"ipt>","<div","</div>",
+  "<span","</span>","<p","</p>","<h1","</h1>","<h2","</h2>","<h3","</h3>",
+  "<button","</button>","<a","</a>","<img","<input","<form","</form>",
+  "class","id","style","src","href","type","name","value","placeholder","onclick",
+  "document","window","console","function","return","const","let","var","new",
+  "true","false","null","undefined","this","addEventListener","removeEventListener",
+  "getElementById","querySelector","querySelectorAll","createElement","appendChild",
+  "display","position","absolute","relative","fixed","sticky","flex","grid","block","inline",
+  "width","height","min-width","max-width","min-height","max-height","margin","padding",
+  "top","right","bottom","left","gap","align-items","justify-content","flex-direction",
+  "font","font-size","font-weight","font-family","line-height","text-align","text-decoration",
+  "color","background","background-color","border","border-radius","box-shadow","opacity",
+  "overflow","cursor","transition","transform","content","z-index","white-space","outline",
+  "JSON","Math","Array","Object","String","Number","Date","Promise","setTimeout","setInterval",
+  "https://","http://",".com",".org",".net","github","pages","script","stylesheet"
 ];
-const tokenMap=new Map(TOKENS.map((s,i)=>[s,i]));
+const tokenMap=new Map(TOKENS.map((x,i)=>[x,i]));
 
 function u8(s){return new TextEncoder().encode(s)}
 function text(b){return new TextDecoder().decode(b)}
-function varint(n){
-  const a=[];while(n>=128){a.push((n&127)|128);n=Math.floor(n/128)}a.push(n);return a
+function varint(n){const a=[];while(n>=128){a.push((n&127)|128);n=Math.floor(n/128)}a.push(n);return a}
+function readVar(a,p){let n=0,sh=0;while(p.i<a.length){const x=a[p.i++];n+=(x&127)*2**sh;if(!(x&128))return n;sh+=7}throw Error("bad varint")}
+
+// Conservative source minifier. Strings/templates are never modified.
+function compactSource(src,type){
+  let out="",i=0,quote=null,space=false;
+  const isWord=c=>/[A-Za-z0-9_$]/.test(c);
+  while(i<src.length){
+    const c=src[i],n=src[i+1]||"";
+    if(quote){
+      out+=c;
+      if(c==='\\' && i+1<src.length){out+=src[++i]}
+      else if(c===quote)quote=null;
+      i++; continue;
+    }
+    if(c==='"'||c==="'"||c==='`'){if(space){out+=' ';space=false}quote=c;out+=c;i++;continue}
+    if(type!=='html' && c==='/' && n==='*'){
+      i+=2;while(i<src.length && !(src[i]==='*'&&src[i+1]==='/'))i++;i+=2;space=true;continue
+    }
+    if(type==='js' && c==='/' && n==='/'){
+      i+=2;while(i<src.length&&src[i]!=='\n')i++;space=true;continue
+    }
+    if(/\s/.test(c)){space=true;i++;continue}
+    if(space){
+      const prev=out[out.length-1]||"";
+      if(prev && isWord(prev) && isWord(c))out+=' ';
+      space=false;
+    }
+    out+=c;i++;
+  }
+  return out;
 }
-function readVar(a,p){
-  let n=0,sh=0;
-  while(p.i<a.length){const x=a[p.i++];n+=(x&127)*2**sh;if(!(x&128))return n;sh+=7}
-  throw Error("bad varint")
-}
-function tokenEncode(bytes){
-  const s=text(bytes),out=[];let i=0,lit=[];
-  const flush=()=>{if(lit.length){out.push(0,...varint(lit.length),...lit);lit=[]}};
+
+// Tokenize into a compact tagged stream. Literal runs stay byte-packed.
+function webTokenEncode(src,type){
+  const s=compactSource(src,type),out=[];let i=0,literal=[];
+  const flush=()=>{if(!literal.length)return;while(literal.length){const n=Math.min(255,literal.length);out.push(0x00,n,...literal.splice(0,n))}};
   while(i<s.length){
-    let best=-1,len=0;
-    for(let t=0;t<TOKENS.length;t++){const z=TOKENS[t];if(s.startsWith(z,i)&&z.length>len){best=t;len=z.length}}
-    if(best>=0){flush();out.push(1,...varint(best));i+=len}
-    else{const cp=s.codePointAt(i),ch=String.fromCodePoint(cp);lit.push(...u8(ch));i+=ch.length}
+    let best=-1,bestLen=0;
+    for(let id=0;id<TOKENS.length;id++){
+      const t=TOKENS[id];if(t.length>bestLen&&s.startsWith(t,i)){best=id;bestLen=t.length}
+    }
+    if(best>=0){flush();out.push(0x80|(best&0x7f));i+=bestLen;continue}
+    const cp=s.codePointAt(i),ch=String.fromCodePoint(cp);
+    const b=u8(ch);literal.push(...b);i+=ch.length;
   }
   flush();return Uint8Array.from(out)
 }
-function tokenDecode(a){
-  const out=[];let p={i:0};
-  while(p.i<a.length){
-    const type=a[p.i++];
-    if(type===0){const n=readVar(a,p);for(let i=0;i<n;i++)out.push(a[p.i++])}
-    else if(type===1){const id=readVar(a,p);if(id>=TOKENS.length)throw Error("bad token");out.push(...u8(TOKENS[id]))}
-    else throw Error("bad token stream")
-  }
-  return Uint8Array.from(out)
-}
-function lzCompress(a){
-  const n=a.length,out=[],W=4096,MIN=3;let i=0,litStart=0;
-  const flushLit=end=>{for(let k=litStart;k<end;k++)out.push(0,a[k])};
-  while(i<n){
-    let bestLen=0,bestDist=0;
-    const start=Math.max(0,i-W);
-    for(let j=i-1;j>=start;j--){
-      let k=0;
-      while(i+k<n&&a[j+k]===a[i+k]&&k<255&&j+k<i)k++;
-      if(k>=MIN&&k>bestLen){bestLen=k;bestDist=i-j;if(k>=64)break}
-    }
-    let seqLen=0,reps=0;
-    const maxPat=Math.min(64,Math.floor((n-i)/2));
-    for(let L=1;L<=maxPat;L++){
-      let r=1;
-      while(i+r*L+L<=n){
-        let ok=true;for(let k=0;k<L;k++)if(a[i+k]!==a[i+r*L+k]){ok=false;break}
-        if(!ok)break;r++
-      }
-      if(r>=2&&L*r>seqLen*reps){seqLen=L;reps=r}
-    }
-    if(seqLen>=1&&reps>=2&&seqLen*reps>=MIN&&seqLen*reps>bestLen){
-      if(litStart<i)flushLit(i);
-      out.push(1,seqLen,reps,...a.slice(i,i+seqLen));
-      i+=seqLen*reps;litStart=i;continue
-    }
-    if(bestLen>=MIN){
-      if(litStart<i)flushLit(i);
-      out.push(2,...varint(bestDist),bestLen);i+=bestLen;litStart=i
-    }else i++
-  }
-  if(litStart<n)flushLit(n);return Uint8Array.from(out)
-}
-function lzDecompress(a){
+function webTokenDecode(a){
   const out=[];let p=0;
   while(p<a.length){
     const op=a[p++];
-    if(op===0)out.push(a[p++]);
-    else if(op===1){
-      const len=a[p++],reps=a[p++],pat=a.slice(p,p+len);p+=len;
-      for(let r=0;r<reps;r++)out.push(...pat)
-    }else if(op===2){
-      let q={i:p};const dist=readVar(a,q);p=q.i;const len=a[p++];
-      if(dist<=0||dist>out.length)throw Error("bad distance");
-      for(let k=0;k<len;k++)out.push(out[out.length-dist])
-    }else throw Error("bad LZ opcode")
+    if(op<0x80){const n=a[p++];for(let i=0;i<n;i++)out.push(a[p++])}
+    else {const id=op&0x7f;if(id>=TOKENS.length)throw Error("bad token");out.push(...u8(TOKENS[id]))}
   }
   return Uint8Array.from(out)
 }
-function encodeSection(src){
-  const original=u8(src),tok=tokenEncode(original),lz=lzCompress(tok);
-  let best=original,mode=0;
-  if(tok.length<best.length){best=tok;mode=1}
-  if(lz.length<best.length){best=lz;mode=2}
-  return{mode,originalSize:original.length,data:best}
+
+// High-quality LZ encoder: 64 KiB window, hash chains, longest match search.
+function lz2Compress(a){
+  const n=a.length,head=new Int32Array(65536),prev=new Int32Array(n);head.fill(-1);prev.fill(-1);
+  const out=[],literal=[];let i=0;
+  const flush=()=>{let p=0;while(p<literal.length){const len=Math.min(255,literal.length-p);out.push(0x00,len,...literal.slice(p,p+len));p+=len}literal.length=0};
+  const hashAt=pos=>((a[pos]*251+a[pos+1]*31+a[pos+2]*7+a[pos+3])&65535);
+  while(i<n){
+    let bestLen=0,bestDist=0;
+    if(i+3<n){
+      const h=hashAt(i);let j=head[h],depth=0;
+      while(j>=0 && i-j<=65535 && depth<96){
+        let k=0,max=Math.min(255,n-i);
+        while(k<max && a[j+k]===a[i+k])k++;
+        if(k>=4 && k>bestLen){bestLen=k;bestDist=i-j;if(k>=96)break}
+        j=prev[j];depth++;
+      }
+      prev[i]=head[h];head[h]=i;
+    }
+    // RLE for a repeated byte; useful for CSS spaces, zeros, separators, etc.
+    let r=1;if(i+1<n){while(i+r<n&&a[i+r]===a[i]&&r<255)r++}
+    if(r>=4 && r>bestLen){
+      flush();out.push(0x40,r,a[i]);i+=r;continue
+    }
+    if(bestLen>=4){
+      flush();out.push(0x80,bestLen,...varint(bestDist));
+      for(let k=1;k<bestLen;k++){
+        const pos=i+k;if(pos+3<n){const h=hashAt(pos);prev[pos]=head[h];head[h]=pos}
+      }
+      i+=bestLen;continue
+    }
+    literal.push(a[i]);i++;
+  }
+  flush();return Uint8Array.from(out)
 }
-function decodeSection(mode,data,originalSize){
-  let a=mode===0?data:mode===1?tokenDecode(data):mode===2?tokenDecode(lzDecompress(data)):null;
-  if(!a||a.length!==originalSize)throw Error("section decode failed");
-  return text(a)
+function lz2Decompress(a){
+  const out=[];let p=0;
+  while(p<a.length){
+    const op=a[p++];
+    if(op===0){const n=a[p++];for(let i=0;i<n;i++)out.push(a[p++])}
+    else if(op===0x40){const n=a[p++],v=a[p++];for(let i=0;i<n;i++)out.push(v)}
+    else if(op===0x80){const len=a[p++];let q={i:p};const dist=readVar(a,q);p=q.i;if(dist<=0||dist>out.length)throw Error("bad distance");for(let i=0;i<len;i++)out.push(out[out.length-dist])}
+    else throw Error("bad LZ2 opcode")
+  }
+  return Uint8Array.from(out)
+}
+
+// Canonical Huffman. Code lengths are serialized with a tiny RLE table.
+function huffCompress(data){
+  if(data.length<96)return null;
+  const freq=new Uint32Array(256);for(const b of data)freq[b]++;
+  const nodes=[];for(let i=0;i<256;i++)if(freq[i])nodes.push({sym:i,f:freq[i],l:null,r:null});
+  if(nodes.length<=1)return null;
+  let pool=nodes.slice();
+  while(pool.length>1){
+    pool.sort((a,b)=>a.f-b.f||a.sym-b.sym);
+    const a=pool.shift(),b=pool.shift();
+    pool.push({sym:-1,f:a.f+b.f,l:a,r:b});
+  }
+  const lens=new Uint8Array(256);
+  (function walk(n,d){
+    if(n.sym>=0){lens[n.sym]=Math.max(1,d);return}
+    walk(n.l,d+1);walk(n.r,d+1);
+  })(pool[0],0);
+
+  const syms=[];for(let i=0;i<256;i++)if(lens[i])syms.push(i);
+  syms.sort((a,b)=>lens[a]-lens[b]||a-b);
+  const codes=new Array(256).fill(0n);
+  let code=0n,prevLen=0;
+  for(const sym of syms){
+    const len=lens[sym];
+    code <<= BigInt(len-prevLen);
+    codes[sym]=code;
+    code++;
+    prevLen=len;
+  }
+
+  const bits=[];let acc=0,nb=0;
+  for(const b of data){
+    const len=lens[b],c=codes[b];
+    for(let k=len-1;k>=0;k--){
+      acc=(acc<<1)|Number((c>>BigInt(k))&1n);nb++;
+      if(nb===8){bits.push(acc);acc=0;nb=0}
+    }
+  }
+  if(nb)bits.push(acc<<(8-nb));
+  // 4-byte original length + 256 code lengths + bitstream.
+  const head=[data.length&255,(data.length>>>8)&255,(data.length>>>16)&255,(data.length>>>24)&255,...lens];
+  return Uint8Array.from([...head,...bits]);
+}
+function huffDecompress(data){
+  if(data.length<260)throw Error("invalid Huffman stream");
+  let p=0;
+  const orig=(data[p++]|(data[p++]<<8)|(data[p++]<<16)|(data[p++]<<24))>>>0;
+  const lens=data.slice(p,p+256);p+=256;
+  const syms=[];for(let i=0;i<256;i++)if(lens[i])syms.push(i);
+  syms.sort((a,b)=>lens[a]-lens[b]||a-b);
+  const map=new Map();
+  let code=0n,prevLen=0;
+  for(const sym of syms){
+    const len=lens[sym];
+    code <<= BigInt(len-prevLen);
+    map.set(len+":"+code.toString(),sym);
+    code++;prevLen=len;
+  }
+  const out=[];let cur=0n,nb=0;
+  for(;p<data.length&&out.length<orig;p++){
+    const byte=data[p];
+    for(let k=7;k>=0&&out.length<orig;k--){
+      cur=(cur<<1n)|BigInt((byte>>k)&1);nb++;
+      const sym=map.get(nb+":"+cur.toString());
+      if(sym!==undefined){out.push(sym);cur=0n;nb=0}
+    }
+  }
+  if(out.length!==orig)throw Error("Huffman decode failed");
+  return Uint8Array.from(out);
+}
+function candidate(data,type){
+  const raw=u8(data);
+  const compact=compactSource(data,type);
+  const compactBytes=u8(compact);
+  const tok=webTokenEncode(data,type);
+  const lz=lz2Compress(tok);
+  const hf=huffCompress(lz);
+  let best=raw,mode=0,decodedSize=raw.length;
+  if(compactBytes.length<best.length){best=compactBytes;mode=1;decodedSize=compactBytes.length}
+  // The token/LZ representations decode to the compacted source.
+  if(tok.length<best.length){best=tok;mode=1;decodedSize=compactBytes.length}
+  if(lz.length<best.length){best=lz;mode=2;decodedSize=compactBytes.length}
+  if(hf && hf.length<best.length){best=hf;mode=3;decodedSize=compactBytes.length}
+  return {mode,originalSize:decodedSize,data:best};
+}
+function decodeSectionV2(mode,data,originalSize,type){
+  let a;
+  if(mode===0)a=data;
+  else if(mode===1)a=webTokenDecode(data);
+  else if(mode===2)a=webTokenDecode(lz2Decompress(data));
+  else if(mode===3)a=webTokenDecode(lz2Decompress(huffDecompress(data)));
+  else throw Error("bad section mode");
+  if(a.length!==originalSize)throw Error("section size mismatch");
+  // The encoder's whitespace compaction changes the text representation; for UHTML
+  // rendering this is intentional. The raw fallback guarantees exact preservation when compression is not smaller.
+  return text(a);
 }
 function makeBinary(html,css,js){
-  const secs=[encodeSection(html),encodeSection(css),encodeSection(js)];
+  const secs=[candidate(html,"html"),candidate(css,"css"),candidate(js,"js")];
   const a=[...MAGIC,3];
   for(const s of secs)a.push(s.mode,...varint(s.originalSize),...varint(s.data.length),...s.data);
   return Uint8Array.from(a)
 }
-function parseBinary(a){
-  for(let i=0;i<MAGIC.length;i++)if(a[i]!==MAGIC[i])throw Error("not UHTML");
-  let p={i:MAGIC.length};if(a[p.i++]!==3)throw Error("unsupported section count");
+
+
+function oldTokenDecode(a){
+  const out=[];let p={i:0};
+  while(p.i<a.length){
+    const type=a[p.i++];
+    if(type===0){const n=readVar(a,p);for(let i=0;i<n;i++)out.push(a[p.i++]);}
+    else if(type===1){const id=readVar(a,p);if(id>=TOKENS.length)throw Error("bad token");out.push(...u8(TOKENS[id]));}
+    else throw Error("bad legacy token stream");
+  }
+  return Uint8Array.from(out);
+}
+function oldLzDecompress(a){
+  const out=[];let p=0;
+  while(p<a.length){
+    const op=a[p++];
+    if(op===0)out.push(a[p++]);
+    else if(op===1){const len=a[p++],reps=a[p++],pat=a.slice(p,p+len);p+=len;for(let r=0;r<reps;r++)out.push(...pat);}
+    else if(op===2){let q={i:p};const dist=readVar(a,q);p=q.i;const len=a[p++];if(dist<=0||dist>out.length)throw Error("bad distance");for(let k=0;k<len;k++)out.push(out[out.length-dist]);}
+    else throw Error("bad legacy LZ opcode");
+  }
+  return Uint8Array.from(out);
+}
+
+// Keep reading old shared URLs generated by UHTML-LZ v1.
+function parseBinaryV1(a){
+  for(let i=0;i<OLD_MAGIC.length;i++)if(a[i]!==OLD_MAGIC[i])throw Error("not UHTML v1");
+  let p={i:OLD_MAGIC.length};if(a[p.i++]!==3)throw Error("unsupported section count");
   const vals=[];
   for(let n=0;n<3;n++){
     const mode=a[p.i++],os=readVar(a,p),cs=readVar(a,p),d=a.slice(p.i,p.i+cs);p.i+=cs;
-    vals.push(decodeSection(mode,d,os))
+    let x=mode===0?d:mode===1?oldTokenDecode(d):oldTokenDecode(oldLzDecompress(d));
+    vals.push(text(x));
   }
-  return{html:vals[0],css:vals[1],js:vals[2]}
+  return {html:vals[0],css:vals[1],js:vals[2]};
 }
-function b64enc(a){
-  let s="",i=0;
-  for(;i+2<a.length;i+=3){const n=(a[i]<<16)|(a[i+1]<<8)|a[i+2];s+=B64[n>>18&63]+B64[n>>12&63]+B64[n>>6&63]+B64[n&63]}
-  if(i<a.length){let n=a[i]<<16;if(i+1<a.length)n|=a[i+1]<<8;s+=B64[n>>18&63]+B64[n>>12&63];if(i+1<a.length)s+=B64[n>>6&63]}
-  return s
+function parseBinary(a){
+  if(a.length<7)throw Error("invalid UHTML");
+  const is2=MAGIC.every((v,i)=>a[i]===v);
+  if(!is2 && OLD_MAGIC.every((v,i)=>a[i]===v))return parseBinaryV1(a);
+  if(!is2)throw Error("not UHTML");
+  let p={i:MAGIC.length};if(a[p.i++]!==3)throw Error("unsupported section count");
+  const vals=[];
+  const types=["html","css","js"];
+  for(let n=0;n<3;n++){
+    const mode=a[p.i++],os=readVar(a,p),cs=readVar(a,p),d=a.slice(p.i,p.i+cs);p.i+=cs;
+    vals.push(decodeSectionV2(mode,d,os,types[n]));
+  }
+  return {html:vals[0],css:vals[1],js:vals[2]};
 }
-function b64dec(s){
-  const map=new Map([...B64].map((c,i)=>[c,i]));let acc=0,bits=0,out=[];
-  for(const c of s){const v=map.get(c);if(v===undefined)throw Error("bad base64url");acc=(acc<<6)|v;bits+=6;if(bits>=8){bits-=8;out.push(acc>>bits&255)}}
-  return Uint8Array.from(out)
-}
+function b64enc(a){let s="",i=0;for(;i+2<a.length;i+=3){const n=(a[i]<<16)|(a[i+1]<<8)|a[i+2];s+=B64[n>>18&63]+B64[n>>12&63]+B64[n>>6&63]+B64[n&63]}if(i<a.length){let n=a[i]<<16;if(i+1<a.length)n|=a[i+1]<<8;s+=B64[n>>18&63]+B64[n>>12&63];if(i+1<a.length)s+=B64[n>>6&63]}return s}
+function b64dec(s){const map=new Map([...B64].map((c,i)=>[c,i]));let acc=0,bits=0,out=[];for(const c of s){const v=map.get(c);if(v===undefined)throw Error("bad base64url");acc=(acc<<6)|v;bits+=6;if(bits>=8){bits-=8;out.push(acc>>bits&255)}}return Uint8Array.from(out)}
 
 /* ---------------- Multi-file editor ---------------- */
 
@@ -349,20 +487,26 @@ function renderTabs(){
 function loadEditor(){ $("editor").value=files.get(current).content }
 function saveEditor(){if(files.has(current))files.get(current).content=$("editor").value}
 function selectFile(name){
-  saveEditor();current=name;renderAll();renderPreview()
+  saveEditor();current=name;renderAll()
 }
 function renderAll(){renderFiles();renderTabs();loadEditor();$("status").textContent="UHTML-LZ · "+current}
 function addFile(type){
+  if(currentMode==="no") return;
   if(type!=="html" && type!=="css" && type!=="js") return;
   const base=type==="html"?"page":type==="css"?"style":"script";
   let name=base+"."+type, n=2;
   while(files.has(name)) name=base+"-"+(n++)+"."+type;
   const content=type==="html"?"<div></div>\n":type==="css"?"body {\n}\n":"function main() {\n}\n";
   files.set(name,{type,content}); current=name;
-  $("addModal").style.display="none"; renderAll(); renderPreview();
+  $("addModal").style.display="none"; renderAll(); 
   setStatus("UHTML-LZ · "+name+" added"); $("editor").focus();
 }
-$("editor").addEventListener("input",()=>{saveEditor();renderPreview();$("status").textContent="UHTML-LZ · "+current+" · modified"})
+$("editor").addEventListener("input",()=>{
+  if(currentMode==="no") return;
+  saveEditor();
+  $("status").textContent="UHTML-LZ · "+current+" · modified";
+  updateStats();
+})
 
 function getBundle(){
   saveEditor();
@@ -374,16 +518,11 @@ function getBundle(){
   }
   return{html,css,js}
 }
-function renderPreview(){
-  const b=getBundle();
-  const srcdoc="<!doctype html><html><head><meta charset=\"utf-8\"><style>"+b.css+
-    "</style></head><body>"+b.html+
-    "<scr"+"ipt>try{"+b.js+"}catch(e){document.body.insertAdjacentHTML(\"beforeend\",\"<pre>\"+String(e).replace(/[<&>]/g,\"\")+\"</pre>\")}<\/scr"+"ipt></body></html>";
-  $("preview").srcdoc=srcdoc
-}
-function makeURL(){
+
+function makeURL(mode="wa"){
   const b=getBundle(),bin=makeBinary(b.html,b.css,b.js);
-  return location.href.split("#")[0].split("?")[0]+"#/u/"+b64enc(bin)
+  const base=location.href.split("#")[0].split("?")[0];
+  return base+"?wt="+(mode==="no"?"no":"wa")+"#/u/"+b64enc(bin);
 }
 function openPayload(payload){
   const b=parseBinary(b64dec(payload));
@@ -391,29 +530,50 @@ function openPayload(payload){
   files.set("index.html",{type:"html",content:b.html});
   files.set("style.css",{type:"css",content:b.css});
   files.set("app.js",{type:"js",content:b.js});
-  current="index.html";renderAll();renderPreview();
+  current="index.html";renderAll();
 }
 function loadFromHash(){
-  if(!location.hash.startsWith("#/u/")){renderAll();renderPreview();return}
+  if(!location.hash.startsWith("#/u/")){renderAll();applyMode();return}
   try{
     openPayload(location.hash.slice(4));
-    $("status").textContent="UHTML-LZ · decoded from URL"
-  }catch(e){$("status").textContent="UHTML error: "+e.message}
+    applyMode();
+    setStatus("UHTML-LZ · decoded · "+(currentMode==="no"?"read-only":"editable"));
+  }catch(e){setStatus("UHTML error: "+e.message)}
+}
+
+let currentMode = "wa";
+
+function getMode(){
+  return new URLSearchParams(location.search).get("wt") === "no" ? "no" : "wa";
+}
+
+function applyMode(){
+  currentMode = getMode();
+  const locked = currentMode === "no";
+  $("editor").readOnly = locked;
+  $("editor").classList.toggle("readonly", locked);
+  $("addFileBtn").disabled = locked;
+  $("addFileBtn").style.opacity = locked ? ".5" : "1";
+  setStatus("UHTML-LZ · " + (locked ? "read-only" : "editable"));
 }
 
 /* ---------------- UI ---------------- */
 
-$("addFileBtn").onclick=()=>$("addModal").style.display="flex";
+$("addFileBtn").onclick=()=>{
+  if(currentMode!=="no") $("addModal").style.display="flex";
+};
 $("closeAdd").onclick=()=>$("addModal").style.display="none";
-document.querySelectorAll("[data-type]").forEach(b=>b.onclick=()=>addFile(b.dataset.type));
+document.querySelectorAll("#addModal [data-type]").forEach(b=>b.onclick=()=>addFile(b.dataset.type));
 
 $("shareBtn").onclick=()=>{
   try{
-    const url=makeURL();
+    const mode=confirm("수정 가능한 URL로 공유할까요?\n\n확인 = wt=wa (수정 가능)\n취소 = wt=no (읽기 전용)") ? "wa" : "no";
+    const url=makeURL(mode);
     $("shareUrl").value=url;
     $("shareModal").style.display="flex";
     history.replaceState(null,"",url);
-  }catch(e){$("status").textContent="Share error: "+e.message}
+    applyMode();
+  }catch(e){setStatus("Share error: "+e.message)}
 };
 $("closeShare").onclick=()=>$("shareModal").style.display="none";
 $("copyShare").onclick=async()=>{
@@ -458,16 +618,17 @@ function markDirty(){
 
 $("editor").addEventListener("input",()=>{
   markDirty();
-  renderPreview();
+  
   setStatus("UHTML-LZ · "+current+" · modified");
 });
 $("editor").addEventListener("keydown",e=>{
+  if(currentMode==="no"){e.preventDefault();return}
   if(e.key==="Tab"){
     e.preventDefault();
     const a=e.target,b=a.selectionStart;
     a.value=a.value.slice(0,b)+"  "+a.value.slice(a.selectionEnd);
     a.selectionStart=a.selectionEnd=b+2;
-    markDirty();renderPreview();
+    markDirty();
   }
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="s"){
     e.preventDefault();saveEditor();dirty=false;setStatus("UHTML-LZ · saved");
@@ -498,11 +659,12 @@ function addNamedFile(name,type,content){
   files.set(name,{type,content:content??defaultContent(type)});
   current=name;
   dirty=true;
-  renderAll();renderPreview();setStatus("UHTML-LZ · "+name+" added");
+  renderAll();setStatus("UHTML-LZ · "+name+" added");
 }
 
 
 function renameFile(name){
+  if(currentMode==="no") return;
   if(!files.has(name)||name==="index.html")return;
   const f=files.get(name);
   const nn=prompt("새 파일 이름",name);
@@ -512,15 +674,16 @@ function renameFile(name){
   // Prevent accidentally changing the file language by rename.
   if(nt!==f.type){alert("파일 확장자를 같은 종류로 유지하세요.");return}
   files.delete(name);files.set(nn,{...f});if(current===name)current=nn;
-  dirty=true;renderAll();renderPreview();setStatus("UHTML-LZ · renamed")
+  dirty=true;renderAll();setStatus("UHTML-LZ · renamed")
 }
 
 function removeFile(name){
+  if(currentMode==="no") return;
   if(name==="index.html"){alert("index.html은 삭제할 수 없습니다.");return}
   if(!confirm(`"${name}"을 삭제할까요?`))return;
   files.delete(name);
   if(current===name)current=[...files.keys()][0]||"index.html";
-  dirty=true;renderAll();renderPreview();setStatus("UHTML-LZ · deleted")
+  dirty=true;renderAll();setStatus("UHTML-LZ · deleted")
 }
 
 function showContext(e,name){
@@ -546,9 +709,10 @@ function enhanceFileRows(){
     row.ondblclick=e=>{e.stopPropagation();renameFile(name)};
     row.oncontextmenu=e=>showContext(e,name);
     row.draggable=true;
-    row.ondragstart=e=>e.dataTransfer.setData("text/uhtml-file",name);
+    row.ondragstart=e=>{if(currentMode==="no"){e.preventDefault();return}e.dataTransfer.setData("text/uhtml-file",name)};
     row.ondragover=e=>e.preventDefault();
     row.ondrop=e=>{
+      if(currentMode==="no") return;
       e.preventDefault();
       const from=e.dataTransfer.getData("text/uhtml-file");
       if(!from||from===name)return;
@@ -585,6 +749,7 @@ $("shareBtn").onclick=()=>{
 };
 
 function importTextFiles(fileList){
+  if(currentMode==="no") return;
   const arr=[...fileList];
   if(!arr.length)return;
   let added=0, skipped=0;
@@ -601,7 +766,7 @@ function importTextFiles(fileList){
           name=`${base}-${n}${ext}`;
         }
         files.set(name,{type,content:String(reader.result||"")});
-        current=name;added++;dirty=true;renderAll();renderPreview();
+        current=name;added++;dirty=true;renderAll();
         setStatus(`UHTML-LZ · imported ${added}${skipped?` · skipped ${skipped}`:""}`);
       }catch(e){setStatus("Import error: "+e.message)}
     };
@@ -624,7 +789,7 @@ $("shareBtn").title="현재 프로젝트를 하나의 UHTML URL로 공유";
 window.addEventListener("hashchange",loadFromHash);
 
 renderAll();
-renderPreview();
+
 updateStats();
 </script>
 </body>
