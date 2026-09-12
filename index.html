@@ -536,14 +536,45 @@ function openPayload(payload){
   files.set("style.css",{type:"css",content:b.css});
   files.set("app.js",{type:"js",content:b.js});
   current="index.html";renderAll();
+  return b;
 }
+
+function escapeScriptEnd(code){
+  return String(code).replace(/<\/script/gi,"<\\/script");
+}
+
+function showPublicPage(bundle){
+  const page = '<!doctype html><html><head><meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<style>' + bundle.css + '</style></head><body>' +
+    bundle.html +
+    '<script>' + escapeScriptEnd(bundle.js) + '<\/script>' +
+    '</body></html>';
+  document.open();
+  document.write(page);
+  document.close();
+}
+
 function loadFromHash(){
-  if(!location.hash.startsWith("#/u/")){renderAll();applyMode();return}
-  try{
-    openPayload(location.hash.slice(4));
+  const mode=getMode();
+  if(!location.hash.startsWith("#/u/")){
+    renderAll();
     applyMode();
-    setStatus("UHTML-LZ · decoded · "+(currentMode==="no"?"read-only":"editable"));
-  }catch(e){setStatus("UHTML error: "+e.message)}
+    return;
+  }
+  try{
+    const bundle=openPayload(location.hash.slice(4));
+    if(mode==="no") {
+      showPublicPage(bundle);
+      return;
+    }
+    applyMode();
+    setStatus("UHTML-LZ · decoded · editable");
+  }catch(e){
+    document.body.innerHTML='<div style="font:16px Arial;padding:30px">UHTML error: '+
+      String(e.message).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+
+      '</div>';
+  }
 }
 
 let currentMode = "wa";
@@ -571,10 +602,11 @@ $("closeAdd").onclick=()=>$("addModal").style.display="none";
 document.querySelectorAll("#addModal [data-type]").forEach(b=>b.onclick=()=>addFile(b.dataset.type));
 
 $("shareBtn").onclick=()=>{
+  if(currentMode==="no") return;
   try{
     saveEditor();
-    $("shareUrl").value=makeURL(currentMode);
-    $("shareModeText").textContent="현재 권한: "+(currentMode==="no"?"읽기 전용 (wt=no)":"수정 가능 (wt=wa)");
+    $("shareUrl").value="";
+    $("shareModeText").textContent="공유 권한을 선택하세요.";
     $("shareModal").style.display="flex";
   }catch(e){setStatus("Share error: "+e.message)}
 };
@@ -749,22 +781,6 @@ renderAll=function(){
   updateStats();
 };
 
-function generateShareURL(){
-  saveEditor();
-  const u=makeURL();
-  history.replaceState(null,"",u);
-  return u;
-}
-$("shareBtn").onclick=()=>{
-  try{
-    const url=generateShareURL();
-    $("shareUrl").value=url;
-    $("shareModal").style.display="flex";
-    setStatus("UHTML-LZ · share URL generated");
-    dirty=false;
-  }catch(e){setStatus("Share error: "+e.message)}
-};
-
 function importTextFiles(fileList){
   if(currentMode==="no") return;
   const arr=[...fileList];
@@ -806,7 +822,7 @@ $("shareBtn").title="현재 프로젝트를 하나의 UHTML URL로 공유";
 window.addEventListener("hashchange",loadFromHash);
 
 renderAll();
-
+applyMode();
 updateStats();
 </script>
 </body>
