@@ -564,7 +564,8 @@ function loadFromHash(){
     return;
   }
   try{
-    const bundle=openPayload(location.hash.slice(4));
+    const payload=location.hash.slice(4).replace(/[?&]wt=(wa|no)(?:[&#].*)?$/i,"");
+    const bundle=openPayload(payload);
     if(mode==="no") {
       showPublicPage(bundle);
       return;
@@ -582,7 +583,14 @@ let currentMode = "wa";
 
 function getMode(){
   const params=new URLSearchParams(location.search);
-  return params.get("wt")==="no" ? "no" : "wa";
+  if(params.get("wt")==="no") return "no";
+  if(params.get("wt")==="wa") return "wa";
+
+  // Also accept wt after the UHTML payload for robust sharing, e.g.
+  // #/u/<payload>?wt=no or #/u/<payload>&wt=no
+  const hash=location.hash;
+  const m=hash.match(/[?&]wt=(wa|no)(?:[&#]|$)/i);
+  return m && m[1].toLowerCase()==="no" ? "no" : "wa";
 }
 
 function applyMode(){
