@@ -544,16 +544,31 @@ function escapeScriptEnd(code){
 }
 
 function showPublicPage(bundle){
-  // wt=no is a real website view: remove the editor completely.
+  // wt=no = actual website output. Keep the current document alive and
+  // replace only the body contents so the running bootstrap script is not aborted.
   document.title = "UHTML Website";
-  document.documentElement.innerHTML = '<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style id="uhtml-public-style"></style></head><body><div id="uhtml-public-root"></div></body>';
-  const style=document.getElementById("uhtml-public-style");
+  document.body.innerHTML = "";
+  document.body.style.cssText = "";
+  document.documentElement.style.cssText = "";
+
+  const style=document.createElement("style");
+  style.id="uhtml-public-style";
   style.textContent=bundle.css;
-  const root=document.getElementById("uhtml-public-root");
+  document.head.replaceChildren(
+    ...Array.from(document.head.children).filter(el => el.tagName === "TITLE" || el.tagName === "META"),
+    style
+  );
+
+  const root=document.createElement("div");
+  root.id="uhtml-public-root";
   root.innerHTML=bundle.html;
-  const script=document.createElement("script");
-  script.textContent=bundle.js;
-  document.body.appendChild(script);
+  document.body.appendChild(root);
+
+  if(bundle.js.trim()){
+    const script=document.createElement("script");
+    script.textContent=bundle.js.replace(/<\/script/gi,"<\\/script");
+    document.body.appendChild(script);
+  }
 }
 
 function loadFromHash(){
@@ -561,10 +576,11 @@ function loadFromHash(){
   if(!location.hash.startsWith("#/u/")){
     renderAll();
     applyMode();
+    updateStats();
     return;
   }
   try{
-    const payload=location.hash.slice(4).replace(/[?&]wt=(wa|no)(?:[&#].*)?$/i,"");
+    const payload=location.hash.slice(4).replace(/[?&]wt=(wa|no)(?:[&#].*)?$/i,"").split(/[?&]wt=/i)[0];
     const bundle=openPayload(payload);
     if(mode==="no") {
       showPublicPage(bundle);
@@ -831,9 +847,7 @@ $("shareBtn").title="현재 프로젝트를 하나의 UHTML URL로 공유";
 
 window.addEventListener("hashchange",loadFromHash);
 
-renderAll();
-applyMode();
-updateStats();
+loadFromHash();
 </script>
 </body>
 </html>
